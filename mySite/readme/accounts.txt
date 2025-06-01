@@ -1,0 +1,270 @@
+//models
+from django.contrib.auth.models import AbstractUser
+from django.db import models
+
+class User(AbstractUser):
+    bio = models.TextField(blank=True)
+    profile_picture = models.ImageField(upload_to='profile_pics/', blank=True, null=True)
+
+    def __str__(self):
+        return f"@{self.username}"
+
+//forms
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import UserCreationForm
+from django.core.exceptions import ValidationError
+from django import forms
+from .models import User
+
+User=get_user_model() #dynamically gets the custom user model (if you've overridden Django’s default User model).
+
+class UserCreateForm(UserCreationForm):
+
+    class Meta:
+        fields=('username','email','password1')
+        model=User #ties the form to your custom User model.
+
+    def clean_email(self): #ensures the email is unique.
+        email = self.cleaned_data.get('email')#current email
+        qs = User.objects.filter(email=email)#Retrieves the email that was input in the form after initial validation.
+        if self.instance:# exists (editing existing user), exclude that instance from the check (to avoid false-positive conflict with the current user’s email).
+            qs = qs.exclude(pk=self.instance.pk)#excludes current email
+        if qs.exists():
+            raise ValidationError("A user with that email already exists.")
+        return email
+
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.fields['username'].label='Display Name'
+        self.fields['email'].label='Email Adress'
+
+
+class UserUpdateForm(forms.ModelForm):
+    class Meta:
+        model = User
+        fields = ['username', 'email', 'profile_picture','bio']  # <-- Add profile_picture
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['username'].label = 'Display Name'
+        self.fields['email'].label = 'Email Address'
+
+    def clean_email(self):
+        email = self.cleaned_data.get('email')
+        qs = User.objects.filter(email=email)  # Fixed: use `User`, not `user`
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise ValidationError("A user with that email already exists.")
+        return email
+    
+    def clean_profile_picture(self):
+        image = self.cleaned_data.get('profile_picture')
+        if image:
+            valid_mime_types = ['image/jpeg', 'image/png']
+            valid_extensions = ['.jpg', '.jpeg', '.png']
+            import os
+            ext = os.path.splitext(image.name)[1].lower()
+            if not ext in valid_extensions:
+                raise ValidationError("Only .jpg and .png files are allowed.")
+            if hasattr(image, 'content_type'):
+                if image.content_type not in valid_mime_types:
+                    raise ValidationError("Unsupported file type.")
+        return image
+
+//views
+
+from django.urls import reverse_lazy
+from django.views.generic import CreateView, UpdateView,DeleteView
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.shortcuts import redirect
+from django.contrib.auth import get_user_model,logout
+
+from . import forms
+user=get_user_model()
+
+class SignUp(CreateView):
+    form_class = forms.UserCreateForm  # ✅ fixed typo here
+    success_url = reverse_lazy('login')
+    template_name = 'accounts/signup.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            return redirect('home')  # or any other page you'd prefer
+        return super().dispatch(request, *args, **kwargs)
+    
+class EditPage(LoginRequiredMixin, UpdateView):
+   
+    form_class = forms.UserUpdateForm  # You need to define this form
+    template_name = 'accounts/edit.html'
+    success_url = reverse_lazy('home')  # Redirect after saving changes
+
+    def get_object(self, queryset=None):
+        return self.request.user  # Ensure users can only edit themselves
+
+class DeletePage(LoginRequiredMixin, DeleteView):
+    model = user
+    template_name = 'accounts/delete.html'
+    success_url = reverse_lazy('home')
+
+    def get_object(self, queryset=None):
+        return self.request.user
+
+    def delete(self, request, *args, **kwargs):
+        logout(request)  # Log out before deleting the user
+        return super().delete(request, *args, **kwargs)
+
+
+//settings
+LOGIN_REDIRECT_URL='home'
+LOGOUT_REDIRECT_URL='home'
+
+
+//templates
+/delete.html
+{% extends "base.html" %}
+
+{% block content %}
+  <h2>Delete Your Account</h2>
+  <p>Are you sure you want to delete your account? This action cannot be undone.</p>
+  
+  <form method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">Yes, delete my account</button>
+    <a href="{% url 'accounts:edit' %}" class="btn btn-secondary">Cancel</a>
+  </form>
+{% endblock %}
+
+/edit.html
+{% extends "base.html" %}
+
+{% block content %}
+  <h2>Edit Your Profile</h2>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form.as_p }}
+    
+    <button type="submit">Save Changes</button>
+  </form>
+
+  {% if user.profile_picture %}
+    <img src="{{ user.profile_picture.url }}" alt="Profile Picture" height="100">
+  {% endif %}
+  
+
+  <a href="{% url 'accounts:delete' %}">delete</a>
+{% endblock %}
+
+/login.html
+{% extends "base.html" %}
+{% block content %}
+<div class="container">
+  <h1>Login</h1>
+  <form method="POST">
+    {% csrf_token %}
+    
+    <div>
+      <label for="id_username">Username</label>
+      {{ form.username }}
+      {% if form.username.errors %}
+        <div class="error">
+          {% for error in form.username.errors %}
+            <p>{{ error }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+    
+    <div>
+      <label for="id_password">Password</label>
+      {{ form.password }}
+      {% if form.password.errors %}
+        <div class="error">
+          {% for error in form.password.errors %}
+            <p>{{ error }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+    
+    <div>
+      <input type="submit" value="Login">
+    </div>
+    
+    {% if form.non_field_errors %}
+      <div class="error">
+        {% for error in form.non_field_errors %}
+          <p>{{ error }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+    
+  </form>
+</div>
+
+
+{% endblock %}
+
+/signup.html
+
+{% extends "base.html" %}
+
+
+{% block content %}
+<div class="container">
+    <h1>Sign Up</h1>
+    <form method="POST">
+        {% csrf_token %}
+
+        <div class="form-group">
+            {{ form.username.label_tag }}
+            {{ form.username }}
+            {{ form.username.errors }}
+        </div>
+        <div class="form-group">
+            {{ form.email.label_tag }}
+            {{ form.email }}
+            {{ form.email.errors }}
+        </div>
+
+        <div class="form-group">
+            {{ form.password1.label_tag }}
+            {{ form.password1 }}
+            {{ form.password1.errors }}
+        </div>
+
+        <div class="form-group">
+            {{ form.password2.label_tag }}
+            {{ form.password2 }}
+            {{ form.password2.errors }}
+        </div>
+
+        <input type="submit" class="btn btn-primary" value="Sign Up">
+    </form>
+</div>
+{% endblock %}
+
+
+
+//urls
+from django.urls import path
+from django.contrib.auth import views as auth_views
+from .import views
+app_name='accounts'
+
+urlpatterns=[
+    path('login/',auth_views.LoginView.as_view(template_name='accounts/login.html'),name='login'),
+    path('logout/',auth_views.LogoutView.as_view(),name='logout'),
+    path('signup',views.SignUp.as_view(),name='signup'),
+    path('edit/',views.EditPage.as_view(),name='edit'),
+    path('delete/',views.DeletePage.as_view(),name='delete')
+]
+
+//admin
+/admin.py 
+from django.contrib import admin
+from . models import User
+
+# Register your models here.
+admin.site.register(User)

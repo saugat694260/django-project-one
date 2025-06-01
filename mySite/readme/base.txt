@@ -1,0 +1,16 @@
+//folders
+- create tempelates and static folder
+- under static folder create css and js folder and for each create a master file which will be used for shared pages
+
+//files
+- under tempelates folder create base.html and index.html
+. base.html is used for shared html 
+.index.html is used for initial page that appear as home wwhen opening site
+
+//apps
+- create apps accounts,users_app,makeNotes
+
+//superuser
+- create a super user 
+. name:author
+.password:author

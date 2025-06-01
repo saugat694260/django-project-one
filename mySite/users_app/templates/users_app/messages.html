@@ -1,0 +1,57 @@
+<!-- users_app/messages.html -->
+{% extends 'base.html' %}
+
+{% block content %}
+  <h1>Messages with {{ recipient.username }}</h1>
+
+  <div id="messages-container">
+    {% for message in messages %}
+      <div class="message">
+        <strong>{{ message.sender.username }}:</strong> {{ message.text }}
+      </div>
+    {% empty %}
+      <p>No messages yet.</p>
+    {% endfor %}
+  </div>
+
+  <form id="message-form">
+    {% csrf_token %}
+    <textarea id="message-input" placeholder="Type your message..." required></textarea>
+    <button type="submit" id="send-button">Send</button>
+  </form>
+
+  <script>
+    const username = "{{ recipient.username }}";  // We're sending to recipient
+    const ws = new WebSocket(`ws://${window.location.host}/ws/messages/${username}/`);
+
+    ws.onmessage = function(e) {
+      const data = JSON.parse(e.data);
+      const message = data.message;
+      const sender = data.sender;
+
+      const container = document.getElementById('messages-container');
+      const messageDiv = document.createElement('div');
+      messageDiv.classList.add('message');
+      messageDiv.innerHTML = `<strong>${sender}:</strong> ${message}`;
+      container.appendChild(messageDiv);
+    };
+
+    ws.onclose = function(e) {
+      console.error('WebSocket closed unexpectedly');
+    };
+
+    document.getElementById('message-form').onsubmit = function(e) {
+      e.preventDefault();  // ❗ Prevent page refresh
+      const input = document.getElementById('message-input');
+      const message = input.value.trim();
+
+      if (message) {
+        ws.send(JSON.stringify({
+          message: message,
+          sender: "{{ request.user.username }}"
+        }));
+        input.value = '';
+      }
+    };
+  </script>
+{% endblock %}

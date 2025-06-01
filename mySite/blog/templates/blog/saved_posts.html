@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Saved Posts</h2>
+
+{% for post in posts %}
+    <div>
+        <h3>{{ post.title }} - by {{ post.author.username }}</h3>
+        <p>{{ post.content }}</p>
+
+        <!-- Like section -->
+        <p>
+            Likes: <span id="like-count-{{ post.id }}">{{ post.likes.count }}</span>
+            {% if user != post.author %}
+                <button onclick="sendLike({{ post.id }})" id="like-btn-{{ post.id }}">
+                    {% if user in post.likes.all %}
+                        Unlike
+                    {% else %}
+                        Like
+                    {% endif %}
+                </button>
+            {% else %}
+                <em>You can't like your own post</em>
+            {% endif %}
+        </p>
+
+        <!-- Save section -->
+        <p>
+            <button onclick="sendSave({{ post.id }})" id="save-btn-{{ post.id }}">
+                {% if user in post.saved_by.all %}
+                    Unsave
+                {% else %}
+                    Save
+                {% endif %}
+            </button>
+        </p>
+
+        <!-- Edit/Delete (if user is author) -->
+        {% if user == post.author %}
+            <p>
+                <a href="{% url 'edit-post' post.id %}">Edit</a> |
+                <a href="{% url 'delete-post' post.id %}">Delete</a>
+            </p>
+        {% endif %}
+    </div>
+    <hr>
+{% empty %}
+    <p>You have no saved posts.</p>
+{% endfor %}
+
+<!-- Inject current user ID for WebSocket JS -->
+<script>
+    const currentUserId = {{ request.user.id }};
+</script>
+
+<!-- WebSocket JavaScript -->
+<script>
+const socket = new WebSocket('ws://' + window.location.host + '/ws/posts/');
+
+socket.onopen = () => {
+    console.log('WebSocket connected');
+};
+
+socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+
+    if (data.type === 'like_update') {
+        const likeCountEl = document.getElementById(`like-count-${data.post_id}`);
+        const likeBtn = document.getElementById(`like-btn-${data.post_id}`);
+        if (likeCountEl) likeCountEl.textContent = data.like_count;
+        if (likeBtn && data.updated_by === currentUserId) {
+            likeBtn.textContent = data.liked ? 'Unlike' : 'Like';
+        }
+    }
+
+    if (data.type === 'save_update') {
+        const saveBtn = document.getElementById(`save-btn-${data.post_id}`);
+        if (saveBtn && data.updated_by === currentUserId) {
+            saveBtn.textContent = data.saved ? 'Unsave' : 'Save';
+        }
+    }
+};
+
+function sendLike(postId) {
+    socket.send(JSON.stringify({
+        action: 'toggle_like',
+        post_id: postId,
+        user_id: currentUserId
+    }));
+}
+
+function sendSave(postId) {
+    socket.send(JSON.stringify({
+        action: 'toggle_save',
+        post_id: postId,
+        user_id: currentUserId
+    }));
+}
+</script>
+{% endblock %}

@@ -1,0 +1,217 @@
+//models
+from django.db import models
+from django.utils import timezone
+
+class Note(models.Model):
+    title = models.CharField(max_length=255, blank=True)
+    content = models.TextField()
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title if self.title else self.created_at.strftime('%Y-%m-%d %H:%M:%S')
+
+//forms
+from django import forms
+from .models import Note
+
+class NoteForm(forms.ModelForm):
+    class Meta:
+        model = Note
+        fields = ['title', 'content']
+        widgets = {
+            'title': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Enter note title (optional)'}),
+            'content': forms.Textarea(attrs={'class': 'form-control', 'placeholder': 'Write your note here...', 'rows': 10}),
+        
+        }
+
+class UploadFileForm(forms.Form):
+    file = forms.FileField(label='Upload .txt file')
+
+//views
+from django.views.generic import ListView, CreateView, UpdateView, DeleteView
+from django.urls import reverse_lazy
+from django.utils import timezone
+from .models import Note
+from .forms import NoteForm
+from django.http import HttpResponse
+from django.views.generic.edit import FormView
+from .forms import UploadFileForm
+from django.views import View
+
+
+from django.shortcuts import get_object_or_404
+
+class NoteListView(ListView):
+    model = Note
+    template_name = 'makeNotes/note_list.html'
+    context_object_name = 'notes'
+    ordering = ['-updated_at']
+
+class NoteCreateView(CreateView):
+    model = Note
+    form_class = NoteForm
+    template_name = 'makeNotes/note_form.html'
+    success_url = reverse_lazy('makeNotes:note_list')
+
+    def form_valid(self, form):
+        if not form.cleaned_data['title']:
+            form.instance.title = timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+        return super().form_valid(form)
+
+class NoteUpdateView(UpdateView):
+    model = Note
+    form_class = NoteForm
+    template_name = 'makeNotes/note_form.html'
+    success_url = reverse_lazy('makeNotes:note_list')
+
+    def form_valid(self, form):
+        if not form.cleaned_data['title']:
+            form.instance.title = timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+        return super().form_valid(form)
+
+class NoteDeleteView(DeleteView):
+    model = Note
+    template_name = 'makeNotes/note_confirm_delete.html'
+    success_url = reverse_lazy('makeNotes:note_list')
+
+class NoteDownloadView(View):
+    def get(self, request, pk):
+        note = get_object_or_404(Note, pk=pk)
+        if not note.content.strip():
+            return HttpResponse('This note is empty and cannot be downloaded.', status=400)
+
+        response = HttpResponse(note.content, content_type='text/plain')
+        filename = f"{note.title or note.created_at.strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+    
+class NoteUploadView(FormView):
+    template_name = 'makeNotes/note_upload.html'
+    form_class = UploadFileForm
+    success_url = reverse_lazy('makeNotes:note_list')
+
+    def form_valid(self, form):
+        uploaded_file = self.request.FILES['file']
+        # Ensure the file is a .txt
+        if not uploaded_file.name.endswith('.txt'):
+            form.add_error('file', 'Only .txt files are allowed.')
+            return self.form_invalid(form)
+
+        content = uploaded_file.read().decode('utf-8')
+        # Check for empty content
+        if not content.strip():
+            form.add_error('file', 'The file is empty.')
+            return self.form_invalid(form)
+
+        # Create the note
+        title = uploaded_file.name.replace('.txt', '')
+        Note.objects.create(title=title, content=content)
+        return super().form_valid(form)
+    
+
+
+//templates
+/note_list.html
+
+
+
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>My Notes</h1>
+    <a href="{% url 'makeNotes:note_create' %}" >Create New Note</a>
+     <a href="{% url 'makeNotes:note_upload' %}">Upload Note</a>
+
+    <ul class="list-group">
+        {% for note in notes %}
+            <li>
+                <a href="{% url 'makeNotes:note_edit' note.pk %}">{{ note.title }}</a>
+                <span>
+                    <a href="{% url 'makeNotes:note_edit' note.pk %}" >Edit</a>
+                    <a href="{% url 'makeNotes:note_delete' note.pk %}" >Delete</a>
+                     <a href="{% url 'makeNotes:note_download' note.pk %}" >Download</a>
+                </span>
+            </li>
+        {% empty %}
+            <li >No notes available.</li>
+        {% endfor %}
+    </ul>
+{% endblock %}
+
+/note_form
+
+{% extends "base.html" %}
+
+{% block content %}
+   <h1>{% if note %}Edit{% else %}Create{% endif %} Note</h1>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">{% if note %}Update{% else %}Save{% endif %}</button>
+        <a href="{% url 'makeNotes:note_list' %}" >Cancel</a>
+    </form>
+{% endblock %}
+
+ /note_upload.html
+ 
+
+
+
+{% extends "base.html" %}
+
+{% block content %}
+   <h1>Upload Note (.txt file)</h1>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="file" >Choose .txt file</label>
+            {{ form.file }}
+            {% if form.file.errors %}
+                <div>
+                    {% for error in form.file.errors %}
+                        <p>{{ error }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+        <button type="submit" >Upload</button>
+        <a href="{% url 'makeNotes:note_list' %}" >Cancel</a>
+    </form>
+{% endblock %}
+
+
+/note_comfirm_delete.html
+
+{% extends "base.html" %}
+
+{% block content %}
+  <h1>Delete Note</h1>
+    <p>Are you sure you want to delete this note: <strong>{{ note }}</strong>?</p>
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit">Yes, delete</button>
+        <a href="{% url 'makeNotes:note_list' %}">Cancel</a>
+    </form>
+{% endblock %}
+
+//urls
+from django.urls import path
+from .import views
+app_name='makeNotes'
+
+urlpatterns=[
+    
+  path('', views.NoteListView.as_view(), name='note_list'),
+    path('new/', views.NoteCreateView.as_view(), name='note_create'),
+    path('<int:pk>/edit/', views.NoteUpdateView.as_view(), name='note_edit'),
+    path('<int:pk>/delete/', views.NoteDeleteView.as_view(), name='note_delete'),
+ path('<int:pk>/download/', views.NoteDownloadView.as_view(), name='note_download'),
+    path('upload/', views.NoteUploadView.as_view(), name='note_upload'),
+]
+//admin
+from django.contrib import admin
+from .models import Note
+
+# Register your models here.
+admin.site.register(Note)

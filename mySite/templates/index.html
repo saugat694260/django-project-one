@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Welcome to Star Social</h1>
+    {% if user.is_authenticated %}
+              <h1>Welcome, @{{ user.username }}</h1>
+              
+              <h1>email{{ user.email }}</h1>
+              <li><a href="{% url 'accounts:edit' %}">edit</a></li>
+    {% endif %}
+{% endblock %}

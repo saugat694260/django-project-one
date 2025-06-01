@@ -1,0 +1,170 @@
+//models
+from django.db import models
+from django.contrib.auth import get_user_model
+
+class Message(models.Model):
+    # Use lazy evaluation to ensure the apps are fully loaded before accessing the user model
+    sender = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name='sent_messages')
+    recipient = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name='received_messages')
+    text = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Message from {self.sender.username} to {self.recipient.username} at {self.timestamp}"
+
+//views
+from django.contrib.auth import get_user_model
+from django.views.generic import ListView, TemplateView
+from django.db.models import Q  # Import Q
+from .models import Message
+from django.http import Http404
+from django.shortcuts import render, redirect
+
+User = get_user_model()
+
+class UserList(ListView):
+    model = User
+    template_name = 'users_app/users_list.html'
+    context_object_name = 'users'
+
+    def get_queryset(self):
+        # Get all users except the currently logged-in user
+        return User.objects.exclude(id=self.request.user.id)
+    
+class UserMessages(TemplateView):
+    template_name = 'users_app/messages.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        # Get the recipient user based on the URL
+        recipient_username = self.kwargs.get('username')
+        recipient = User.objects.filter(username=recipient_username).first()
+
+        if not recipient:
+            raise Http404("User not found")
+
+        # Get all messages between the logged-in user and the recipient
+        messages = Message.objects.filter(
+            (Q(sender=self.request.user) & Q(recipient=recipient)) |
+            (Q(sender=recipient) & Q(recipient=self.request.user))
+        ).order_by('timestamp')
+
+        context['recipient'] = recipient
+        context['messages'] = messages
+        return context
+
+    def post(self, request, *args, **kwargs):
+        recipient_username = self.kwargs.get('username')
+        recipient = User.objects.filter(username=recipient_username).first()
+
+        if not recipient:
+            raise Http404("User not found")
+
+        text = request.POST.get('message_text')
+
+        if text:
+            # Save the new message in the database
+            message = Message.objects.create(
+                sender=request.user,
+                recipient=recipient,
+                text=text
+            )
+
+        return redirect('users_app:user_messages', username=recipient_username)
+
+//templates
+/users_list.html
+
+{% extends "base.html" %}
+{% block content %}
+
+    <ul>
+        {% for user in users %}
+            <li><a href="{% url 'users_app:user_messages' username=user.username %}">{{ user.username }}</a></li>
+        {% empty %}
+            <li>No users found.</li>
+        {% endfor %}
+    </ul>
+
+{% endblock %}
+
+/messages.html
+<!-- users_app/messages.html -->
+{% extends 'base.html' %}
+
+{% block content %}
+  <h1>Messages with {{ recipient.username }}</h1>
+
+  <div id="messages-container">
+    {% for message in messages %}
+      <div class="message">
+        <strong>{{ message.sender.username }}:</strong> {{ message.text }}
+      </div>
+    {% empty %}
+      <p>No messages yet.</p>
+    {% endfor %}
+  </div>
+
+  <form id="message-form">
+    {% csrf_token %}
+    <textarea id="message-input" placeholder="Type your message..." required></textarea>
+    <button type="submit" id="send-button">Send</button>
+  </form>
+
+  <script>
+    const username = "{{ recipient.username }}";  // We're sending to recipient
+    const ws = new WebSocket(`ws://${window.location.host}/ws/messages/${username}/`);
+
+    ws.onmessage = function(e) {
+      const data = JSON.parse(e.data);
+      const message = data.message;
+      const sender = data.sender;
+
+      const container = document.getElementById('messages-container');
+      const messageDiv = document.createElement('div');
+      messageDiv.classList.add('message');
+      messageDiv.innerHTML = `<strong>${sender}:</strong> ${message}`;
+      container.appendChild(messageDiv);
+    };
+
+    ws.onclose = function(e) {
+      console.error('WebSocket closed unexpectedly');
+    };
+
+    document.getElementById('message-form').onsubmit = function(e) {
+      e.preventDefault();  // ❗ Prevent page refresh
+      const input = document.getElementById('message-input');
+      const message = input.value.trim();
+
+      if (message) {
+        ws.send(JSON.stringify({
+          message: message,
+          sender: "{{ request.user.username }}"
+        }));
+        input.value = '';
+      }
+    };
+  </script>
+{% endblock %}
+
+//urls
+
+from django.urls import path
+from django.contrib.auth import views 
+from .import views
+app_name='users_app'
+
+urlpatterns=[
+    
+    path('', views.UserList.as_view(), name='users'),
+    path('users/messages/<str:username>/', views.UserMessages.as_view(), name='user_messages'),
+
+]
+//admin
+from django.contrib import admin
+
+from .models import Message
+
+# Register the Message model to the admin site
+admin.site.register(Message)
+

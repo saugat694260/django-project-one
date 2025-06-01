@@ -1,0 +1,27 @@
+
+
+
+
+{% extends "base.html" %}
+
+{% block content %}
+   <h1>Upload Note (.txt file)</h1>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="file" >Choose .txt file</label>
+            {{ form.file }}
+            {% if form.file.errors %}
+                <div>
+                    {% for error in form.file.errors %}
+                        <p>{{ error }}</p>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </div>
+        <button type="submit" >Upload</button>
+        <a href="{% url 'makeNotes:note_list' %}" >Cancel</a>
+    </form>
+{% endblock %}
+
+

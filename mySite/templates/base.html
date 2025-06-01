@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+{% load static %}
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!--fonts from google fonts-->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100..900&display=swap" rel="stylesheet">
+ 
+    <title>Star Social</title>
+    <link rel="stylesheet" href="{% static 'css/master.css' %}">
+  </head>
+  <body>
+    <nav>
+      <div>
+        <a href="{% url 'home' %}">Home</a>
+        <ul>
+          {% if user.is_authenticated %}
+              
+
+            <li><a href="{% url 'users_app:users' %}">users</a></li>
+            <li><a href="{% url 'makeNotes:note_list'%}">notes</a></li>
+            <li><a href="{% url 'product-list'%}">shop</a></li>
+            <li><a href="{% url 'my-products'%}">my product</a></li>
+             <li><a href="{% url 'cart'%}">cart</a></li>
+            <a href="{% url 'blog-home' %}">All Posts</a> |
+        <a href="{% url 'my-posts' %}">My Posts</a> |
+        <a href="{% url 'saved-posts' %}">Saved Posts</a> |
+        <a href="{% url 'add-post' %}">Add Post</a> |
+            <li><a href="#">Create Group</a></li>
+            <li>
+              <form method="post" action="{% url 'accounts:logout' %}" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" style="background:none; border:none; color:blue; cursor:pointer;">
+                  Logout
+                </button>
+              </form>
+            </li>
+          {% else %}
+            <li><a href="#">Groups</a></li>
+            <li><a href="{% url 'accounts:login' %}">Login</a></li>
+            <li><a href="{% url 'accounts:signup' %}">Sign Up</a></li>
+          {% endif %}
+        </ul>
+      </div>
+    </nav>
+    <div>
+      {% block content %}
+      {% endblock %}
+    </div>
+  </body>
+</html>

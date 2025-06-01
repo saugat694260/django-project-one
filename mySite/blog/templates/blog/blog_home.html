@@ -1,0 +1,95 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>All Blog Posts</h2>
+
+{% for post in posts %}
+    <div>
+        <h3>{{ post.title }} - by {{ post.author.username }}</h3>
+        <p>{{ post.content }}</p>
+
+        <!-- Like Section -->
+        <p>
+            Likes: <span id="like-count-{{ post.id }}">{{ post.likes.count }}</span>
+            {% if user != post.author %}
+                <button onclick="toggleLike({{ post.id }})" id="like-btn-{{ post.id }}">
+                    {% if user in post.likes.all %}
+                        Unlike
+                    {% else %}
+                        Like
+                    {% endif %}
+                </button>
+            {% else %}
+                <em>You can't like your own post</em>
+            {% endif %}
+        </p>
+
+        <!-- Save Section -->
+        <p>
+            <button onclick="toggleSave({{ post.id }})" id="save-btn-{{ post.id }}">
+                {% if user in post.saved_by.all %}
+                    Unsave
+                {% else %}
+                    Save
+                {% endif %}
+            </button>
+        </p>
+
+        <!-- Author Actions -->
+        {% if user == post.author %}
+            <p>
+                <a href="{% url 'edit-post' post.id %}">Edit</a> |
+                <a href="{% url 'delete-post' post.id %}">Delete</a>
+            </p>
+        {% endif %}
+    </div>
+    <hr>
+{% empty %}
+    <p>No blog posts yet.</p>
+{% endfor %}
+
+<!-- CSRF token for AJAX requests -->
+<form style="display:none">{% csrf_token %}</form>
+
+<!-- AJAX JavaScript -->
+<script>
+function getCSRFToken() {
+    return document.querySelector('[name=csrfmiddlewaretoken]').value;
+}
+
+function toggleLike(postId) {
+    fetch(`/like/${postId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken(),
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        const likeCountEl = document.getElementById(`like-count-${postId}`);
+        const likeBtn = document.getElementById(`like-btn-${postId}`);
+        if (likeCountEl) likeCountEl.textContent = data.like_count;
+        if (likeBtn) likeBtn.textContent = data.liked ? 'Unlike' : 'Like';
+    });
+}
+
+function toggleSave(postId) {
+    fetch(`/save/${postId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken(),
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        const saveBtn = document.getElementById(`save-btn-${postId}`);
+        if (saveBtn) saveBtn.textContent = data.saved ? 'Unsave' : 'Save';
+    });
+}
+</script>
+
+{% endblock %}

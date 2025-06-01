@@ -1,0 +1,119 @@
+//settings
+
+- add apps name in installed apps
+
+/paths
+
+- add a directory to templates
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+TEMPLATES_DIR=BASE_DIR/'templates'
+
+. on TEMPLATES list add TEMPLATES_DIR in DIRS list
+
+-add a directory for static files
+# Static files (CSS, JavaScript, Images)
+# https://docs.djangoproject.com/en/5.2/howto/static-files/
+
+STATIC_URL = 'static/'
+STATICFILES_DIRS = [BASE_DIR/ 'static']
+
+/extras 
+- add INTERNAL_IPS=['127.0.0.1']
+
+. It enables tools like Django Debug Toolbar.
+
+.Ensures these tools are only shown on internal (safe) IPs.
+
+.Helps prevent exposure of debug info in production.
+
+
+//views
+
+# view for redirection site to home page
+
+from django.views.generic import TemplateView
+
+class HomePage(TemplateView):
+    template_name='index.html'
+    
+
+//urls
+
+from django.contrib import admin
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('',views.HomePage.as_view(),name='home') # url to redirect tothe homepage 
+]
+
+//templates
+
+/base.html -user as shared html
+
+<!DOCTYPE html>
+
+{% load static %} # load static files
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!--fonts from google fonts-->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@100..900&display=swap" rel="stylesheet">
+ 
+    <title>Star Social</title>
+    <link rel="stylesheet" href="{% static 'css/master.css' %}">
+  </head>
+  <body>
+    <nav>
+      <div>
+        <a href="{% url 'home' %}">Home</a>
+        <ul>
+          {% if user.is_authenticated %} # check if the logged in user is is_authenticated or not
+              
+
+            <li><a href="{% url 'users_app:users' %}">users</a></li>
+            <li><a href="{% url 'makeNotes:note_list'%}">notes</a></li>
+            <li><a href="#">Create Group</a></li>
+            <li>
+              <form method="post" action="{% url 'accounts:logout' %}" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" style="background:none; border:none; color:blue; cursor:pointer;">
+                  Logout
+                </button>
+              </form>
+            </li>
+          {% else %}
+            <li><a href="#">Groups</a></li>
+            <li><a href="{% url 'accounts:login' %}">Login</a></li>
+            <li><a href="{% url 'accounts:signup' %}">Sign Up</a></li>
+          {% endif %}
+        </ul>
+      </div>
+    </nav>
+    <div>
+      {% block content %}
+      {% endblock %}
+    </div>
+  </body>
+</html>
+
+/index.html -used as main page
+
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Welcome to Star Social</h1>
+    {% if user.is_authenticated %}
+              <h1>Welcome, @{{ user.username }}</h1>
+              
+              <h1>email{{ user.email }}</h1>
+              <li><a href="{% url 'accounts:edit' %}">edit</a></li>
+    {% endif %}
+{% endblock %}
