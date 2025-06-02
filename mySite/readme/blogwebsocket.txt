@@ -1,0 +1,73 @@
+//consumers.py
+import json
+from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.db import database_sync_to_async
+from django.contrib.auth import get_user_model
+from .models import BlogPost
+
+User = get_user_model()
+
+class PostInteractionConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        await self.accept()
+
+    async def receive(self, text_data):
+        data = json.loads(text_data)
+        post_id = data['post_id']
+        user_id = data['user_id']
+        action = data.get('action')
+
+        user = await self.get_user(user_id)
+        post = await self.get_post(post_id)
+
+        if action == 'toggle_like':
+            liked = await self.toggle_like(post, user)
+            await self.send(json.dumps({
+                'type': 'like_update',
+                'post_id': post.id,
+                'liked': liked,
+                'like_count': post.likes.count(),
+                'updated_by': user.id,
+            }))
+        elif action == 'toggle_save':
+            saved = await self.toggle_save(post, user)
+            await self.send(json.dumps({
+                'type': 'save_update',
+                'post_id': post.id,
+                'saved': saved,
+                'updated_by': user.id,
+            }))
+
+    @database_sync_to_async
+    def get_user(self, user_id):
+        return User.objects.get(id=user_id)
+
+    @database_sync_to_async
+    def get_post(self, post_id):
+        return BlogPost.objects.get(id=post_id)
+
+    @database_sync_to_async
+    def toggle_like(self, post, user):
+        if user in post.likes.all():
+            post.likes.remove(user)
+            return False
+        else:
+            post.likes.add(user)
+            return True
+
+    @database_sync_to_async
+    def toggle_save(self, post, user):
+        if user in post.saved_by.all():
+            post.saved_by.remove(user)
+            return False
+        else:
+            post.saved_by.add(user)
+            return True
+
+//routing.py
+from django.urls import re_path
+from . import consumers
+
+websocket_urlpatterns = [
+    re_path(r'ws/posts/$', consumers.PostInteractionConsumer.as_asgi()),
+]

@@ -1,0 +1,426 @@
+//admin.py 
+from django.contrib import admin
+from .models import Product, Cart, CartItem
+
+admin.site.register(Product)
+admin.site.register(Cart)
+admin.site.register(CartItem)
+
+//forms.py
+
+from django import forms
+from .models import Product
+
+class ProductForm(forms.ModelForm):
+    class Meta:
+        model = Product
+        fields = ['picture', 'name', 'price', 'description', 'category']
+//models.py
+from django.db import models
+from django.contrib.auth import  get_user_model
+from django.utils import timezone
+
+User=get_user_model()
+# Create your models here.
+
+CATEGORY_CHOICES=[
+    ('stationary', 'Stationary'),
+    ('sports', 'Sports'),
+    ('clothes', 'Clothes'),
+    ('others', 'Others'),  
+]
+
+
+class Product(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    picture = models.ImageField(upload_to='product_images/')
+    name = models.CharField(max_length=255)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    description = models.TextField()
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
+    posted_at=models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return self.name
+
+class Cart(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+
+    def __str__(self):
+        return f"Cart for {self.user.username}"
+
+    def total_price(self):
+        return sum(item.total_price() for item in self.items.all())
+
+class CartItem(models.Model):
+    cart = models.ForeignKey(Cart, related_name='items', on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField(default=1)
+
+    def total_price(self):
+        return self.product.price * self.quantity
+
+    def __str__(self):
+        return f"{self.quantity} x {self.product.name}"
+
+//urls.py
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('', views.ProductListView.as_view(), name='product-list'),
+    path('product/<int:pk>/', views.ProductDetailView.as_view(), name='product-detail'),
+    path('post/', views.ProductCreateView.as_view(), name='product-post'),
+    path('my-products/', views.MyProductListView.as_view(), name='my-products'),
+    path('product/<int:pk>/update/', views.ProductUpdateView.as_view(), name='product-update'),
+    path('product/<int:pk>/delete/', views.ProductDeleteView.as_view(), name='product-delete'),
+    path('buy/<int:pk>/', views.BuyProductView.as_view(), name='buy-product'),
+    path('transactions/', views.TransactionView.as_view(), name='transactions'),
+    path('cart/', views.CartView.as_view(), name='cart'),
+path('add-to-cart/<int:pk>/', views.AddToCartView.as_view(), name='add-to-cart'),
+path('remove-from-cart/<int:pk>/', views.RemoveFromCartView.as_view(), name='remove-from-cart'),
+path('cart/buy/', views.BuyCartView.as_view(), name='buy-cart'),
+
+
+]
+
+//views.py
+from django.views.generic import CreateView,ListView,DeleteView,UpdateView,DetailView
+from django.urls import reverse_lazy
+from .models import Product
+from .forms import ProductForm
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import Q
+from django.shortcuts import redirect
+from django.urls import reverse
+from django.views.generic import TemplateView
+from django.http import Http404
+from django.views import View
+from django.shortcuts import get_object_or_404, redirect
+from .models import Product, Cart, CartItem
+
+
+def get_or_create_cart(user):
+    cart, created = Cart.objects.get_or_create(user=user)
+    return cart
+
+
+class ProductCreateView(LoginRequiredMixin, CreateView):
+    model = Product
+    form_class = ProductForm
+    template_name = 'store/product_form.html'
+    success_url = reverse_lazy('product-list')
+
+    def form_valid(self, form):
+        form.instance.user = self.request.user
+        return super().form_valid(form)
+    
+class ProductListView(ListView):
+    model = Product
+    template_name = 'store/product_list.html'
+    context_object_name = 'products'
+    paginate_by = 5  # Show 5 products per page
+
+    def get_queryset(self):
+        queryset = Product.objects.all()
+
+        # Exclude user's own products
+        if self.request.user.is_authenticated:
+            queryset = queryset.exclude(user=self.request.user)
+
+        search_query = self.request.GET.get('q')
+        category_filter = self.request.GET.get('category')
+
+        if search_query:
+            queryset = queryset.filter(
+                Q(name__icontains=search_query) |
+                Q(description__icontains=search_query)
+            )
+
+        if category_filter and category_filter != 'all':
+            queryset = queryset.filter(category=category_filter)
+
+        return queryset
+
+    
+class ProductDetailView(DetailView):
+    model = Product
+    template_name = 'store/product_detail.html'
+    context_object_name = 'product'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        product = self.get_object()
+        user = self.request.user
+
+        context['in_cart'] = False
+
+        if user.is_authenticated:
+            cart, created = Cart.objects.get_or_create(user=user)
+            context['in_cart'] = cart.items.filter(product=product).exists()
+
+        return context
+
+class BuyProductView(View):
+    def post(self, request, pk):
+        # Here you'd handle payment or order logic in future
+        return redirect(reverse('transactions'))
+    
+class TransactionView(TemplateView):
+    template_name = 'store/transactions.html'
+
+class MyProductListView(LoginRequiredMixin, ListView):
+    model = Product
+    template_name = 'store/my_products.html'
+    context_object_name = 'products'
+
+    def get_queryset(self):
+        return Product.objects.filter(user=self.request.user)
+    
+class ProductUpdateView(LoginRequiredMixin, UpdateView):
+    model = Product
+    form_class = ProductForm
+    template_name = 'store/product_form.html'
+    success_url = reverse_lazy('my-products')
+
+    def get_object(self, queryset=None):
+        obj = super().get_object()
+        if obj.user != self.request.user:
+            raise Http404()
+        return obj
+    
+from django.views.generic.edit import DeleteView
+
+class ProductDeleteView(LoginRequiredMixin, DeleteView):
+    model = Product
+    template_name = 'store/product_confirm_delete.html'
+    success_url = reverse_lazy('my-products')
+
+    def get_object(self, queryset=None):
+        obj = super().get_object()
+        if obj.user != self.request.user:
+            raise Http404()
+        return obj
+    
+class AddToCartView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        product = get_object_or_404(Product, pk=pk)
+        cart = get_or_create_cart(request.user)
+
+        cart_item, created = CartItem.objects.get_or_create(cart=cart, product=product)
+
+        if not created:
+            cart_item.quantity += 1
+            cart_item.save()
+
+        return redirect('cart')
+    
+class CartView(LoginRequiredMixin, TemplateView):
+    template_name = 'store/cart.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        cart = get_or_create_cart(self.request.user)
+        context['cart_items'] = cart.items.select_related('product').all()
+        context['total_price'] = cart.total_price()
+        return context
+    
+class RemoveFromCartView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        cart = get_or_create_cart(request.user)
+        cart.items.filter(product_id=pk).delete()
+        return redirect('cart')
+
+class BuyCartView(LoginRequiredMixin, View):
+    def post(self, request):
+        cart = get_or_create_cart(request.user)
+        # Here you'd handle actual transaction logic (order creation etc.)
+
+        # (Optional) Clear the cart after buying
+        cart.items.all().delete()
+
+        return redirect('transactions')
+
+
+//templates
+<h2>Your Cart</h2>
+
+{% if cart_items %}
+    <ul>
+        {% for item in cart_items %}
+            <li>
+              <a href="{% url 'product-detail' item.product.pk %}">
+    <img src="{{ item.product.picture.url }}" alt="{{ item.product.name }}" width="50">
+    {{ item.product.name }}
+</a>
+ — ₹{{ item.product.price }} × {{ item.quantity }} = ₹{{ item.total_price }}
+            </li>
+            <form action="{% url 'remove-from-cart' item.product.pk %}" method="post" style="display:inline;">
+    {% csrf_token %}
+    <button type="submit">Remove</button>
+    </form>
+   
+
+
+        {% endfor %}
+    </ul>
+
+    <h3>Total: ₹{{ total_price }}</h3>
+     <form action="{% url 'buy-cart' %}" method="post">
+    {% csrf_token %}
+    <button type="submit">Buy All</button>
+</form>
+{% else %}
+    <p>Your cart is empty.</p>
+{% endif %}
+
+<p><a href="{% url 'product-list' %}">Continue Shopping</a></p>
+
+/my_products.html
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>My Products</h2>
+
+{% for product in products %}
+    <div>
+        <img src="{{ product.picture.url }}" alt="{{ product.name }}" width="100">
+        <h3>{{ product.name }}</h3>
+        <p>₹{{ product.price }}</p>
+        <a href="{% url 'product-update' product.pk %}">Update</a> |
+        <a href="{% url 'product-delete' product.pk %}">Delete</a>
+    </div>
+    <hr>
+{% empty %}
+    <p>You have not posted any products.</p>
+{% endfor %}
+
+<p><a href="{% url 'product-list' %}">Back to Products</a></p>
+{% endblock %}
+
+/product_confirm_delete.html
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Delete Product</h2>
+<p>Are you sure you want to delete "{{ object.name }}"?</p>
+
+<form method="post">
+    {% csrf_token %}
+    <button type="submit">Yes, delete</button>
+    <a href="{% url 'my-products' %}">Cancel</a>
+</form>
+
+/product_detail.html
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>{{ product.name }}</h2>
+
+<img src="{{ product.picture.url }}" alt="{{ product.name }}" width="200">
+
+<p><strong>Price:</strong> ₹{{ product.price }}</p>
+<p><strong>Description:</strong> {{ product.description }}</p>
+<p><strong>Category:</strong> {{ product.get_category_display }}</p>
+<p><strong>Posted by:</strong> {{ product.user.username }}</p>
+
+{% if product.user != request.user %}
+    <form action="{% url 'buy-product' product.pk %}" method="post">
+        {% csrf_token %}
+        <button type="submit">Buy</button>
+    </form>
+
+    {% if in_cart %}
+        <p><em>This product is already in your cart.</em></p>
+    {% else %}
+        <form action="{% url 'add-to-cart' product.pk %}" method="post" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit">Add to Cart</button>
+        </form>
+    {% endif %}
+
+{% else %}
+    <p><em>This is your product.</em></p>
+{% endif %}
+
+<p><a href="{% url 'product-list' %}">Back to Products</a></p>
+{% endblock %}
+
+/product_form.htmll
+{% extends 'base.html' %}
+
+{% block content %}
+<!-- store/templates/store/product_form.html -->
+<h2>Post a New Product</h2>
+
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Post</button>
+</form>
+
+<p><a href="{% url 'product-list' %}">Back to Products</a></p>
+{% endblock %}
+
+/product_list.html
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Product List</h2>
+
+<form method="get">
+    <input type="text" name="q" placeholder="Search..." value="{{ request.GET.q }}">
+    
+    <select name="category">
+        <option value="all">All Categories</option>
+        <option value="stationary" {% if request.GET.category == 'stationary' %}selected{% endif %}>Stationary</option>
+        <option value="sports" {% if request.GET.category == 'sports' %}selected{% endif %}>Sports</option>
+        <option value="clothes" {% if request.GET.category == 'clothes' %}selected{% endif %}>Clothes</option>
+        <option value="others" {% if request.GET.category == 'others' %}selected{% endif %}>Others</option>
+    </select>
+
+    <button type="submit">Filter</button>
+</form>
+
+<hr>
+
+{% for product in products %}
+    <div>
+        <a href="{% url 'product-detail' product.pk %}">
+            <img src="{{ product.picture.url }}" alt="{{ product.name }}" width="100">
+            <h3>{{ product.name }}</h3>
+            <p>₹{{ product.price }}</p>
+        </a>
+    </div>
+    <hr>
+{% empty %}
+    <p>No products found.</p>
+{% endfor %}
+
+{% if is_paginated %}
+    <div>
+        {% if page_obj.has_previous %}
+            <a href="?{% if request.GET.q %}q={{ request.GET.q }}&{% endif %}{% if request.GET.category %}category={{ request.GET.category }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+        {% endif %}
+
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+
+        {% if page_obj.has_next %}
+            <a href="?{% if request.GET.q %}q={{ request.GET.q }}&{% endif %}{% if request.GET.category %}category={{ request.GET.category }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+        {% endif %}
+    </div>
+{% endif %}
+
+<p><a href="{% url 'product-post' %}">Post a Product</a></p>
+{% endblock %}
+
+/transactions.html
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Transaction Complete</h2>
+<p>You bought this product (dummy page for now).</p>
+
+<p><a href="{% url 'product-list' %}">Back to Products</a></p>
+{% endblock %}

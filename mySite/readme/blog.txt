@@ -1,0 +1,387 @@
+// admin.py
+from django.contrib import admin
+from .models import BlogPost
+
+# Register your models here.
+admin.site.register(BlogPost)
+
+//forms.py
+from django import forms
+from .models import BlogPost
+
+class BlogPostForm(forms.ModelForm):
+    class Meta:
+        model=BlogPost
+        fields=['title','content']
+
+//models.py
+from django.db import models
+from django.contrib.auth import  get_user_model
+
+# Create your models here.
+User=get_user_model()
+
+class BlogPost(models.Model):
+    author=models.ForeignKey(User,on_delete=models.CASCADE)
+    title=models.CharField(max_length=600)
+    content=models.TextField()
+    created_at=models.DateTimeField(auto_now_add=True)
+    likes=models.ManyToManyField(User,related_name='liked_post',blank=True)
+    saved_by=models.ManyToManyField(User,related_name='saved_posts',blank=True)
+
+    def __str__(self):
+        return self.title
+//views.py
+from django.shortcuts import redirect, get_object_or_404
+from django.views import View
+from django.views.generic import ListView, CreateView, UpdateView, DeleteView
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.urls import reverse_lazy
+from .models import BlogPost
+from .forms import BlogPostForm
+from django.http import JsonResponse
+
+
+# Create your views here.
+
+class HomeView(ListView):
+    model=BlogPost
+    template_name='blog/blog_home.html'
+    context_object_name='posts'
+    ordering=['-created_at']
+
+class MyPostView(LoginRequiredMixin,ListView):
+    model=BlogPost
+    template_name='blog/my_posts.html'
+    context_object_name='posts'
+
+    def get_queryset(self):
+        return BlogPost.objects.filter(author=self.request.user)
+    
+class SavedPostView(LoginRequiredMixin,ListView):
+    model=BlogPost
+    template_name='blog/saved_posts.html'
+    context_object_name='posts'
+
+    def get_queryset(self):
+        return self.request.user.saved_posts.all()
+    
+class AddPostView(LoginRequiredMixin,CreateView):
+    model=BlogPost
+    form_class=BlogPostForm
+    template_name='blog/post_form.html'
+    success_url=reverse_lazy('my-posts')
+
+    def form_valid(self,form):
+        form.instance.author=self.request.user
+        return super().form_valid(form)
+    
+class EditPostView(LoginRequiredMixin, UpdateView):
+    model = BlogPost
+    form_class = BlogPostForm
+    template_name = 'blog/post_form.html'
+    success_url = reverse_lazy('my-posts')
+
+    def get_queryset(self):
+        return BlogPost.objects.filter(author=self.request.user)
+    
+class DeletePostView(LoginRequiredMixin, DeleteView):
+    model = BlogPost
+    template_name = 'blog/confirm_delete.html'
+    success_url = reverse_lazy('my-posts')
+
+    def get_queryset(self):
+        return BlogPost.objects.filter(author=self.request.user)
+    
+class LikePostView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        post = get_object_or_404(BlogPost, pk=pk)
+        liked = False
+
+        if request.user in post.likes.all():
+            post.likes.remove(request.user)
+        else:
+            post.likes.add(request.user)
+            liked = True
+
+        return JsonResponse({
+            'liked': liked,
+            'like_count': post.likes.count()
+        })
+    
+class SavePostView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        post = get_object_or_404(BlogPost, pk=pk)
+        saved = False
+
+        if request.user in post.saved_by.all():
+            post.saved_by.remove(request.user)
+        else:
+            post.saved_by.add(request.user)
+            saved = True
+
+        return JsonResponse({
+            'saved': saved
+        })
+
+//urls.py
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path('blogs/', views.HomeView.as_view(), name='blog-home'),
+    path('my-posts/', views.MyPostView.as_view(), name='my-posts'),
+    path('saved/', views.SavedPostView.as_view(), name='saved-posts'),
+    path('add/', views.AddPostView.as_view(), name='add-post'),
+    path('edit/<int:pk>/', views.EditPostView.as_view(), name='edit-post'),
+    path('delete/<int:pk>/', views.DeletePostView.as_view(), name='delete-post'),
+    path('like/<int:pk>/', views.LikePostView.as_view(), name='like-post'),
+    path('save/<int:pk>/', views.SavePostView.as_view(), name='save-post'),
+]
+
+
+//templates
+
+/blog_home.html
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>All Blog Posts</h2>
+
+{% for post in posts %}
+    <div>
+        <h3>{{ post.title }} - by {{ post.author.username }}</h3>
+        <p>{{ post.content }}</p>
+
+        <!-- Like Section -->
+        <p>
+            Likes: <span id="like-count-{{ post.id }}">{{ post.likes.count }}</span>
+            {% if user != post.author %}
+                <button onclick="toggleLike({{ post.id }})" id="like-btn-{{ post.id }}">
+                    {% if user in post.likes.all %}
+                        Unlike
+                    {% else %}
+                        Like
+                    {% endif %}
+                </button>
+            {% else %}
+                <em>You can't like your own post</em>
+            {% endif %}
+        </p>
+
+        <!-- Save Section -->
+        <p>
+            <button onclick="toggleSave({{ post.id }})" id="save-btn-{{ post.id }}">
+                {% if user in post.saved_by.all %}
+                    Unsave
+                {% else %}
+                    Save
+                {% endif %}
+            </button>
+        </p>
+
+        <!-- Author Actions -->
+        {% if user == post.author %}
+            <p>
+                <a href="{% url 'edit-post' post.id %}">Edit</a> |
+                <a href="{% url 'delete-post' post.id %}">Delete</a>
+            </p>
+        {% endif %}
+    </div>
+    <hr>
+{% empty %}
+    <p>No blog posts yet.</p>
+{% endfor %}
+
+<!-- CSRF token for AJAX requests -->
+<form style="display:none">{% csrf_token %}</form>
+
+<!-- AJAX JavaScript -->
+<script>
+function getCSRFToken() {
+    return document.querySelector('[name=csrfmiddlewaretoken]').value;
+}
+
+function toggleLike(postId) {
+    fetch(`/like/${postId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken(),
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        const likeCountEl = document.getElementById(`like-count-${postId}`);
+        const likeBtn = document.getElementById(`like-btn-${postId}`);
+        if (likeCountEl) likeCountEl.textContent = data.like_count;
+        if (likeBtn) likeBtn.textContent = data.liked ? 'Unlike' : 'Like';
+    });
+}
+
+function toggleSave(postId) {
+    fetch(`/save/${postId}/`, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken(),
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        const saveBtn = document.getElementById(`save-btn-${postId}`);
+        if (saveBtn) saveBtn.textContent = data.saved ? 'Unsave' : 'Save';
+    });
+}
+</script>
+
+{% endblock %}
+
+/confirm_delete.html
+{% extends 'base.html' %}
+{% block content %}
+<h2>Delete "{{ post.title }}"?</h2>
+<form method="post">
+    {% csrf_token %}
+    <button type="submit">Yes, delete</button>
+</form>
+{% endblock %}
+
+/my_posts.html
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>My Blog Posts</h2>
+
+{% for post in posts %}
+    <div>
+        <h3>{{ post.title }}</h3>
+        <p>{{ post.content }}</p>
+        <p>Created: {{ post.created_at }}</p>
+
+        <a href="{% url 'edit-post' post.pk %}">Edit</a> |
+        <a href="{% url 'delete-post' post.pk %}">Delete</a>
+    </div>
+    <hr>
+{% endfor %}
+{% endblock %}
+
+/post_form.html
+{% extends 'base.html' %}
+{% block content %}
+<h2>Post Form</h2>
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Submit</button>
+</form>
+{% endblock %}
+
+/saved_posts.html
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Saved Posts</h2>
+
+{% for post in posts %}
+    <div>
+        <h3>{{ post.title }} - by {{ post.author.username }}</h3>
+        <p>{{ post.content }}</p>
+
+        <!-- Like section -->
+        <p>
+            Likes: <span id="like-count-{{ post.id }}">{{ post.likes.count }}</span>
+            {% if user != post.author %}
+                <button onclick="sendLike({{ post.id }})" id="like-btn-{{ post.id }}">
+                    {% if user in post.likes.all %}
+                        Unlike
+                    {% else %}
+                        Like
+                    {% endif %}
+                </button>
+            {% else %}
+                <em>You can't like your own post</em>
+            {% endif %}
+        </p>
+
+        <!-- Save section -->
+        <p>
+            <button onclick="sendSave({{ post.id }})" id="save-btn-{{ post.id }}">
+                {% if user in post.saved_by.all %}
+                    Unsave
+                {% else %}
+                    Save
+                {% endif %}
+            </button>
+        </p>
+
+        <!-- Edit/Delete (if user is author) -->
+        {% if user == post.author %}
+            <p>
+                <a href="{% url 'edit-post' post.id %}">Edit</a> |
+                <a href="{% url 'delete-post' post.id %}">Delete</a>
+            </p>
+        {% endif %}
+    </div>
+    <hr>
+{% empty %}
+    <p>You have no saved posts.</p>
+{% endfor %}
+
+<!-- Inject current user ID for WebSocket JS -->
+<script>
+    const currentUserId = {{ request.user.id }};
+</script>
+
+<!-- WebSocket JavaScript -->
+<script>
+const socket = new WebSocket('ws://' + window.location.host + '/ws/posts/');
+
+socket.onopen = () => {
+    console.log('WebSocket connected');
+};
+
+socket.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+
+    if (data.type === 'like_update') {
+        const likeCountEl = document.getElementById(`like-count-${data.post_id}`);
+        const likeBtn = document.getElementById(`like-btn-${data.post_id}`);
+        if (likeCountEl) likeCountEl.textContent = data.like_count;
+        if (likeBtn && data.updated_by === currentUserId) {
+            likeBtn.textContent = data.liked ? 'Unlike' : 'Like';
+        }
+    }
+
+    if (data.type === 'save_update') {
+        const saveBtn = document.getElementById(`save-btn-${data.post_id}`);
+        if (saveBtn && data.updated_by === currentUserId) {
+            saveBtn.textContent = data.saved ? 'Unsave' : 'Save';
+        }
+    }
+};
+
+function sendLike(postId) {
+    socket.send(JSON.stringify({
+        action: 'toggle_like',
+        post_id: postId,
+        user_id: currentUserId
+    }));
+}
+
+function sendSave(postId) {
+    socket.send(JSON.stringify({
+        action: 'toggle_save',
+        post_id: postId,
+        user_id: currentUserId
+    }));
+}
+</script>
+{% endblock %}
+
+
+
+
+
